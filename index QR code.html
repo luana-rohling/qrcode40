@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Validador de Presença — Conecta 40</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root{
+    --navy:#0B1422; --navy2:#101E33; --blue:#2F6BFF; --blueL:#5B8DFF;
+    --ok:#1FA971; --warn:#E0A106; --err:#E24C4C;
+    --ink:#0E1A2B; --grey:#8A93A3; --line:rgba(255,255,255,.08);
+    box-sizing:border-box;
+    padding-top:env(safe-area-inset-top,0px);
+    padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--navy);color:#fff;font-family:Inter,system-ui,sans-serif}
+  .wrap{max-width:520px;margin:0 auto;padding:14px 14px 28px}
+  header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+  .brand h1{font-family:Outfit;font-weight:800;font-size:19px;margin:0;letter-spacing:.2px}
+  .brand span{font-family:Outfit;font-weight:600;font-size:11px;color:var(--blueL);letter-spacing:1px}
+  .count{background:var(--navy2);border:1px solid var(--line);border-radius:12px;padding:8px 12px;text-align:right;min-width:96px}
+  .count b{font-family:Outfit;font-size:20px;font-weight:800;display:block;line-height:1}
+  .count small{color:var(--grey);font-size:10px;letter-spacing:.5px}
+
+  .card{background:var(--navy2);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px}
+  label{display:block;font-size:12px;color:var(--grey);margin-bottom:6px}
+  input{width:100%;background:#0a1220;border:1px solid var(--line);color:#fff;border-radius:10px;padding:11px 12px;font-size:15px;font-family:Inter}
+  input:focus{outline:none;border-color:var(--blue)}
+
+  #reader{border-radius:14px;overflow:hidden;border:1px solid var(--line);background:#000}
+  #reader video{border-radius:14px}
+
+  .btn{width:100%;border:0;border-radius:12px;padding:14px;font-family:Outfit;font-weight:700;font-size:15px;cursor:pointer}
+  .btn-primary{background:var(--blue);color:#fff}
+  .btn-ghost{background:transparent;color:var(--blueL);border:1px solid var(--line)}
+  .row{display:flex;gap:10px;margin-top:10px}
+  .row .btn{flex:1}
+
+  /* resultado */
+  .result{border-radius:16px;padding:18px 16px;text-align:center;transition:.15s;display:none}
+  .result.show{display:block;animation:pop .18s ease}
+  @keyframes pop{from{transform:scale(.97);opacity:.4}to{transform:scale(1);opacity:1}}
+  .result .st{font-family:Outfit;font-weight:800;font-size:13px;letter-spacing:1.5px;text-transform:uppercase}
+  .result .nm{font-family:Outfit;font-weight:800;font-size:22px;margin:6px 0 2px;line-height:1.15}
+  .result .meta{font-size:12px;opacity:.85}
+  .r-ok{background:rgba(31,169,113,.16);border:1px solid var(--ok)} .r-ok .st{color:#57e3ab}
+  .r-warn{background:rgba(224,161,6,.16);border:1px solid var(--warn)} .r-warn .st{color:#ffd15c}
+  .r-err{background:rgba(226,76,76,.16);border:1px solid var(--err)} .r-err .st{color:#ff8f8f}
+
+  .idle{color:var(--grey);text-align:center;font-size:13px;padding:8px 0}
+  .net{font-size:11px;text-align:center;color:var(--grey);margin-top:4px;min-height:14px}
+  .net.warn{color:#ffd15c}
+
+  .log h3{font-family:Outfit;font-size:12px;color:var(--grey);letter-spacing:1px;text-transform:uppercase;margin:0 0 8px}
+  .log ul{list-style:none;margin:0;padding:0;max-height:230px;overflow:auto}
+  .log li{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .log li .tag{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;white-space:nowrap}
+  .t-ok{background:rgba(31,169,113,.2);color:#57e3ab}
+  .t-warn{background:rgba(224,161,6,.2);color:#ffd15c}
+  .t-err{background:rgba(226,76,76,.2);color:#ff8f8f}
+  .log .nome{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .log .hora{color:var(--grey);font-size:11px;white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <h1>Validador de Presença</h1>
+      <span>CONECTA 40 • hub40</span>
+    </div>
+    <div class="count"><b id="cPres">–</b><small id="cTot">carregando</small></div>
+  </header>
+
+  <div class="card">
+    <label>Seu nome (validador) — fica registrado em cada leitura</label>
+    <input id="validador" placeholder="Ex.: Luana" autocomplete="off">
+  </div>
+
+  <div class="result" id="result"></div>
+
+  <div class="card">
+    <div id="reader"></div>
+    <div class="idle" id="idle">Toque em “Iniciar câmera” e aponte para o QR do crachá.</div>
+    <div class="net" id="net"></div>
+    <div class="row">
+      <button class="btn btn-primary" id="btnStart">Iniciar câmera</button>
+      <button class="btn btn-ghost" id="btnStop" style="display:none">Pausar</button>
+    </div>
+  </div>
+
+  <div class="card log">
+    <h3>Leituras desta sessão (<span id="logN">0</span>)</h3>
+    <ul id="logList"></ul>
+  </div>
+</div>
+
+<script>
+/* ================== CONFIG ================== */
+/* Cole aqui a URL do App da Web do Apps Script (termina em /exec) */
+const WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzrPsxcwBNresfmWGTqlZZyPKK_auGLkc942yEPQarmwWMqAeQkrkrjQK9cbOHlp-ZkOQ/exec";
+/* =========================================== */
+
+const $ = s => document.querySelector(s);
+const resultEl = $("#result"), idleEl = $("#idle"), netEl = $("#net");
+const validadorEl = $("#validador");
+let scanner=null, running=false, busy=false;
+let lastCode="", lastTime=0;
+const seen = new Set();               // dedup local por ID
+const fila = [];                       // fila offline
+
+validadorEl.value = localStorage.getItem("cval") || "";
+validadorEl.addEventListener("input", ()=>localStorage.setItem("cval", validadorEl.value.trim()));
+
+/* ---- chamada ao backend via JSONP (sem problema de CORS no GitHub Pages) ---- */
+function jsonp(params, timeout=9000){
+  return new Promise((resolve,reject)=>{
+    const cb = "cb_"+Math.random().toString(36).slice(2);
+    const qs = new URLSearchParams({...params, callback:cb}).toString();
+    const s = document.createElement("script");
+    let done=false;
+    const t = setTimeout(()=>{ if(!done){done=true; cleanup(); reject(new Error("timeout"));} }, timeout);
+    function cleanup(){ delete window[cb]; s.remove(); clearTimeout(t); }
+    window[cb] = (data)=>{ if(done) return; done=true; cleanup(); resolve(data); };
+    s.onerror = ()=>{ if(!done){done=true; cleanup(); reject(new Error("neterr"));} };
+    s.src = WEBAPP_URL + (WEBAPP_URL.includes("?")?"&":"?") + qs;
+    document.body.appendChild(s);
+  });
+}
+
+/* ---- feedback sonoro/vibratório ---- */
+let AC=null;
+function beep(freq=880,dur=0.12){
+  try{ AC = AC || new (window.AudioContext||window.webkitAudioContext)();
+    const o=AC.createOscillator(), g=AC.createGain();
+    o.frequency.value=freq; o.connect(g); g.connect(AC.destination);
+    g.gain.setValueAtTime(.15,AC.currentTime); o.start();
+    g.gain.exponentialRampToValueAtTime(.0001,AC.currentTime+dur); o.stop(AC.currentTime+dur);
+  }catch(e){}
+}
+function buzz(ms){ if(navigator.vibrate) navigator.vibrate(ms); }
+
+/* ---- render resultado ---- */
+function showResult(kind, st, nome, meta){
+  resultEl.className = "result show " + (kind==="ok"?"r-ok":kind==="warn"?"r-warn":"r-err");
+  resultEl.innerHTML = `<div class="st">${st}</div><div class="nm">${nome||""}</div>`+
+                       (meta?`<div class="meta">${meta}</div>`:"");
+}
+function addLog(kind, nome, hora){
+  const li=document.createElement("li");
+  const tag = kind==="ok"?"t-ok":kind==="warn"?"t-warn":"t-err";
+  const txt = kind==="ok"?"presente":kind==="warn"?"repetido":"erro";
+  li.innerHTML = `<span class="nome">${nome||"—"}</span>
+    <span style="display:flex;gap:8px;align-items:center">
+      <span class="hora">${hora||""}</span><span class="tag ${tag}">${txt}</span></span>`;
+  $("#logList").prepend(li);
+  $("#logN").textContent = $("#logList").children.length;
+}
+
+/* ---- processa um código lido ---- */
+async function processar(id){
+  const now=Date.now();
+  if(id===lastCode && now-lastTime<3000) return;   // evita repique da câmera
+  lastCode=id; lastTime=now;
+  if(seen.has(id)){                                  // já lido nesta sessão
+    showResult("warn","Já validado", id, "Este crachá já passou aqui");
+    beep(500,.15); buzz(60); return;
+  }
+  if(busy) return; busy=true;
+  netEl.className="net"; netEl.textContent="";
+  try{
+    const r = await jsonp({id, validador:(validadorEl.value||"").trim()});
+    if(r.ok && r.status==="novo"){
+      seen.add(id); showResult("ok","Presença confirmada", r.nome, r.hora);
+      addLog("ok", r.nome, r.hora); beep(950,.13); buzz(120); atualizarContador();
+    }else if(r.ok && r.status==="duplicado"){
+      seen.add(id); showResult("warn","Já estava presente", r.nome, "Registrado às "+r.hora);
+      addLog("warn", r.nome, r.hora); beep(520,.15); buzz(60);
+    }else if(r.code==="nao_encontrado"){
+      showResult("err","ID não encontrado", id, "Confira a planilha / o crachá");
+      addLog("err", id, ""); beep(300,.2); buzz([80,60,80]);
+    }else{
+      showResult("err","Erro", id, r.msg||r.code||"tente de novo");
+      beep(300,.2); buzz([80,60,80]);
+    }
+  }catch(err){                                       // sem conexão -> enfileira
+    fila.push(id);
+    netEl.className="net warn";
+    netEl.textContent="Sem conexão — "+fila.length+" na fila, tentando reenviar…";
+    showResult("warn","Sem conexão", id, "Vai registrar assim que voltar");
+    beep(520,.12); buzz(60);
+  }finally{ busy=false; }
+}
+
+/* ---- fila offline: tenta reenviar a cada 4s ---- */
+setInterval(async ()=>{
+  if(!fila.length) return;
+  const id=fila[0];
+  try{
+    const r=await jsonp({id, validador:(validadorEl.value||"").trim()},7000);
+    if(r && r.ok){
+      fila.shift(); seen.add(id);
+      if(r.status==="novo") atualizarContador();
+      addLog(r.status==="novo"?"ok":"warn", r.nome, r.hora);
+      netEl.textContent = fila.length? ("Sem conexão — "+fila.length+" na fila…") : "";
+      if(!fila.length) netEl.className="net";
+    }
+  }catch(e){/* segue tentando */}
+},4000);
+
+/* ---- contador presentes/total ---- */
+async function atualizarContador(){
+  try{
+    const r=await jsonp({action:"stats"},7000);
+    if(r&&r.ok){ $("#cPres").textContent=r.presentes; $("#cTot").textContent="de "+r.total+" presentes"; }
+  }catch(e){ $("#cTot").textContent="contador offline"; }
+}
+
+/* ---- câmera ---- */
+function onScan(text){ processar(String(text).trim()); }
+async function start(){
+  if(running) return;
+  scanner = scanner || new Html5Qrcode("reader");
+  const cfg={ fps:10, qrbox:{width:230,height:230}, aspectRatio:1.0 };
+  try{
+    await scanner.start({facingMode:"environment"}, cfg, onScan, ()=>{});
+    running=true; idleEl.style.display="none";
+    $("#btnStart").style.display="none"; $("#btnStop").style.display="block";
+  }catch(e){
+    idleEl.textContent="Não consegui abrir a câmera. Permita o acesso e use HTTPS (GitHub Pages já é HTTPS).";
+  }
+}
+async function stop(){
+  if(scanner&&running){ await scanner.stop(); running=false; }
+  $("#btnStart").style.display="block"; $("#btnStop").style.display="none";
+  $("#btnStart").textContent="Retomar câmera"; idleEl.style.display="block";
+  idleEl.textContent="Câmera pausada.";
+}
+$("#btnStart").onclick=()=>{ if(AC&&AC.state==="suspended")AC.resume(); start(); };
+$("#btnStop").onclick=stop;
+
+atualizarContador();
+setInterval(atualizarContador, 30000);
+</script>
+</body>
+</html>
