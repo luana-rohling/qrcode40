@@ -117,21 +117,36 @@ const fila = [];                       // fila offline
 validadorEl.value = localStorage.getItem("cval") || "";
 validadorEl.addEventListener("input", ()=>localStorage.setItem("cval", validadorEl.value.trim()));
 
-/* ---- chamada ao backend via JSONP (sem problema de CORS no GitHub Pages) ---- */
-function jsonp(params, timeout=9000){
+/* ---- chamada ao backend: tenta fetch (GET) e, se falhar, cai no JSONP ---- */
+function montarURL(params){
+  const qs = new URLSearchParams(params).toString();
+  return WEBAPP_URL + (WEBAPP_URL.includes("?")?"&":"?") + qs;
+}
+function viaFetch(params, timeout){
+  const ctrl = new AbortController();
+  const t = setTimeout(()=>ctrl.abort(), timeout);
+  return fetch(montarURL(params), {method:"GET", redirect:"follow", signal:ctrl.signal})
+    .then(r=>{ if(!r.ok) throw new Error("http"+r.status); return r.json(); })
+    .finally(()=>clearTimeout(t));
+}
+function viaJsonp(params, timeout){
   return new Promise((resolve,reject)=>{
     const cb = "cb_"+Math.random().toString(36).slice(2);
-    const qs = new URLSearchParams({...params, callback:cb}).toString();
     const s = document.createElement("script");
     let done=false;
     const t = setTimeout(()=>{ if(!done){done=true; cleanup(); reject(new Error("timeout"));} }, timeout);
-    function cleanup(){ delete window[cb]; s.remove(); clearTimeout(t); }
+    function cleanup(){ try{delete window[cb];}catch(e){} s.remove(); clearTimeout(t); }
     window[cb] = (data)=>{ if(done) return; done=true; cleanup(); resolve(data); };
     s.onerror = ()=>{ if(!done){done=true; cleanup(); reject(new Error("neterr"));} };
-    s.src = WEBAPP_URL + (WEBAPP_URL.includes("?")?"&":"?") + qs;
+    s.src = montarURL({...params, callback:cb});
     document.body.appendChild(s);
   });
 }
+async function jsonp(params, timeout=9000){
+  try{ return await viaFetch(params, Math.min(timeout, 8000)); }
+  catch(e){ return await viaJsonp(params, timeout); }   // plano B automático
+}
+
 
 /* ---- feedback sonoro/vibratório ---- */
 let AC=null;
@@ -162,67 +177,63 @@ function addLog(kind, nome, hora){
   $("#logN").textContent = $("#logList").children.length;
 }
 
-/* ---- processa um código lido ---- */
-async function processar(id){
+/* ---- envio "dispara e segue": grava no servidor sem depender de ler a resposta ---- */
+function enviar(id, validador){
+  // no-cors: a requisição chega e grava; o navegador não precisa ler a resposta
+  return fetch(montarURL({id, validador}), {method:"GET", mode:"no-cors", redirect:"follow"});
+}
+function atualizaContadorLocal(){
+  $("#cPres").textContent = seen.size;
+  $("#cTot").textContent = "validados aqui";
+}
+
+/* ---- processa um código lido (id + nome vêm do próprio QR) ---- */
+async function processar(id, nome){
   const now=Date.now();
   if(id===lastCode && now-lastTime<3000) return;   // evita repique da câmera
   lastCode=id; lastTime=now;
-  if(seen.has(id)){                                  // já lido nesta sessão
-    showResult("warn","Já validado", id, "Este crachá já passou aqui");
+  const rotulo = nome || id;
+  if(seen.has(id)){                                  // já lido nesta sessão/aparelho
+    showResult("warn","Já validado", rotulo, "Este crachá já passou por aqui");
     beep(500,.15); buzz(60); return;
   }
-  if(busy) return; busy=true;
+  const validador=(validadorEl.value||"").trim();
+  seen.add(id);                                      // confirma na hora (nome vem do QR)
+  const hora = new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+  showResult("ok","Presença confirmada", rotulo, hora);
+  addLog("ok", rotulo, hora); beep(950,.13); buzz(120);
+  atualizaContadorLocal();
   netEl.className="net"; netEl.textContent="";
   try{
-    const r = await jsonp({id, validador:(validadorEl.value||"").trim()});
-    if(r.ok && r.status==="novo"){
-      seen.add(id); showResult("ok","Presença confirmada", r.nome, r.hora);
-      addLog("ok", r.nome, r.hora); beep(950,.13); buzz(120); atualizarContador();
-    }else if(r.ok && r.status==="duplicado"){
-      seen.add(id); showResult("warn","Já estava presente", r.nome, "Registrado às "+r.hora);
-      addLog("warn", r.nome, r.hora); beep(520,.15); buzz(60);
-    }else if(r.code==="nao_encontrado"){
-      showResult("err","ID não encontrado", id, "Confira a planilha / o crachá");
-      addLog("err", id, ""); beep(300,.2); buzz([80,60,80]);
-    }else{
-      showResult("err","Erro", id, r.msg||r.code||"tente de novo");
-      beep(300,.2); buzz([80,60,80]);
-    }
-  }catch(err){                                       // sem conexão -> enfileira
-    fila.push(id);
+    await enviar(id, validador);                     // grava na planilha
+  }catch(err){                                       // sem rede -> enfileira p/ reenvio
+    fila.push({id, validador});
     netEl.className="net warn";
-    netEl.textContent="Sem conexão — "+fila.length+" na fila, tentando reenviar…";
-    showResult("warn","Sem conexão", id, "Vai registrar assim que voltar");
-    beep(520,.12); buzz(60);
-  }finally{ busy=false; }
+    netEl.textContent="Sem conexão — "+fila.length+" aguardando gravar…";
+  }
 }
 
-/* ---- fila offline: tenta reenviar a cada 4s ---- */
+/* ---- fila offline: reenvia a cada 4s ---- */
 setInterval(async ()=>{
   if(!fila.length) return;
-  const id=fila[0];
+  const item=fila[0];
   try{
-    const r=await jsonp({id, validador:(validadorEl.value||"").trim()},7000);
-    if(r && r.ok){
-      fila.shift(); seen.add(id);
-      if(r.status==="novo") atualizarContador();
-      addLog(r.status==="novo"?"ok":"warn", r.nome, r.hora);
-      netEl.textContent = fila.length? ("Sem conexão — "+fila.length+" na fila…") : "";
-      if(!fila.length) netEl.className="net";
-    }
+    await enviar(item.id, item.validador);
+    fila.shift();
+    netEl.textContent = fila.length? ("Sem conexão — "+fila.length+" aguardando gravar…") : "";
+    if(!fila.length) netEl.className="net";
   }catch(e){/* segue tentando */}
 },4000);
 
-/* ---- contador presentes/total ---- */
-async function atualizarContador(){
-  try{
-    const r=await jsonp({action:"stats"},7000);
-    if(r&&r.ok){ $("#cPres").textContent=r.presentes; $("#cTot").textContent="de "+r.total+" presentes"; }
-  }catch(e){ $("#cTot").textContent="contador offline"; }
-}
 
 /* ---- câmera ---- */
-function onScan(text){ processar(String(text).trim()); }
+function onScan(text){
+  const raw = String(text).trim();
+  const i = raw.indexOf("|");
+  const id = (i>=0 ? raw.slice(0,i) : raw).trim();
+  const nome = (i>=0 ? raw.slice(i+1) : "").trim();
+  processar(id, nome);
+}
 async function start(){
   if(running) return;
   scanner = scanner || new Html5Qrcode("reader");
@@ -244,8 +255,7 @@ async function stop(){
 $("#btnStart").onclick=()=>{ if(AC&&AC.state==="suspended")AC.resume(); start(); };
 $("#btnStop").onclick=stop;
 
-atualizarContador();
-setInterval(atualizarContador, 30000);
+atualizaContadorLocal();
 </script>
 </body>
 </html>
